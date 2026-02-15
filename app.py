@@ -2,36 +2,34 @@ import streamlit as st
 import requests
 import json
 import os
-from PIL import Image
 import base64
+from PIL import Image
 
-# ===============================
+# =========================
 # CONFIG
-# ===============================
+# =========================
 
-IMAGE_API_KEY = "ddc-a4f-5d489223ebb84c0387b2c7e3cb01a751"
+API_KEY = "ddc-a4f-5d489223ebb84c0387b2c7e3cb01a751"
 IMAGE_MODEL = "provider-4/imagen-4"
-
-REASONING_MODEL = "provider-2/deepseek-r1-distill-llama-70b"
-
+REASON_MODEL = "provider-2/deepseek-r1-distill-llama-70b"
 BASE_URL = "https://api.a4f.co/v1"
 
-# ===============================
-# FILE INIT
-# ===============================
+# =========================
+# INIT FILES
+# =========================
 
-def init_file(file, default):
-    if not os.path.exists(file):
-        with open(file, "w") as f:
+def init_file(name, default):
+    if not os.path.exists(name):
+        with open(name, "w") as f:
             json.dump(default, f)
 
 init_file("users.json", {})
 init_file("settings.json", {})
 init_file("structure.json", {})
 
-# ===============================
+# =========================
 # JSON HELPERS
-# ===============================
+# =========================
 
 def load_json(file):
     with open(file, "r") as f:
@@ -41,9 +39,9 @@ def save_json(file, data):
     with open(file, "w") as f:
         json.dump(data, f, indent=4)
 
-# ===============================
-# LOGIN SYSTEM
-# ===============================
+# =========================
+# LOGIN
+# =========================
 
 def login():
     st.title("Login")
@@ -53,10 +51,8 @@ def login():
 
     if st.button("Login"):
         users = load_json("users.json")
-
         if username in users and users[username] == password:
             st.session_state.user = username
-            st.success("Logged in")
             st.rerun()
         else:
             st.error("Invalid credentials")
@@ -65,58 +61,32 @@ def login():
         users = load_json("users.json")
         users[username] = password
         save_json("users.json", users)
-        st.success("Registered successfully")
+        st.success("Registered")
 
-# ===============================
-# SETTINGS
-# ===============================
-
-def load_user_settings(username):
-    settings = load_json("settings.json")
-    return settings.get(username, {
-        "account_name": username,
-        "theme": "light"
-    })
-
-def save_user_settings(username, data):
-    settings = load_json("settings.json")
-    settings[username] = data
-    save_json("settings.json", settings)
-
-def apply_theme(theme):
-    if theme == "dark":
-        st.markdown("""
-        <style>
-        body {background-color:#111; color:white;}
-        </style>
-        """, unsafe_allow_html=True)
-
-# ===============================
+# =========================
 # API CALLS
-# ===============================
+# =========================
 
 def call_reasoning(prompt):
     headers = {
-        "Authorization": f"Bearer {IMAGE_API_KEY}",
+        "Authorization": f"Bearer {API_KEY}",
         "Content-Type": "application/json"
     }
 
     data = {
-        "model": REASONING_MODEL,
-        "messages": [
-            {"role": "user", "content": prompt}
-        ]
+        "model": REASON_MODEL,
+        "messages": [{"role": "user", "content": prompt}]
     }
 
-    res = requests.post(f"{BASE_URL}/chat/completions",
-                        headers=headers,
-                        json=data)
+    r = requests.post(f"{BASE_URL}/chat/completions",
+                      headers=headers,
+                      json=data)
 
-    return res.json()
+    return r.json()
 
 def generate_image(prompt):
     headers = {
-        "Authorization": f"Bearer {IMAGE_API_KEY}",
+        "Authorization": f"Bearer {API_KEY}",
         "Content-Type": "application/json"
     }
 
@@ -126,132 +96,184 @@ def generate_image(prompt):
         "size": "1024x1024"
     }
 
-    res = requests.post(f"{BASE_URL}/images/generations",
-                        headers=headers,
-                        json=data)
+    r = requests.post(f"{BASE_URL}/images/generations",
+                      headers=headers,
+                      json=data)
 
-    return res.json()
+    return r.json()
 
-# ===============================
-# FLOOR + ROOM STRUCTURE
-# ===============================
+# =========================
+# STRUCTURE FUNCTIONS
+# =========================
 
-def add_floor(user, floor_name):
-    structure = load_json("structure.json")
-    if user not in structure:
-        structure[user] = {}
+def get_structure(user):
+    return load_json("structure.json").get(user, {})
 
-    structure[user][floor_name] = {}
-    save_json("structure.json", structure)
+def save_structure(user, data):
+    all_data = load_json("structure.json")
+    all_data[user] = data
+    save_json("structure.json", all_data)
 
-def add_room(user, floor, room_data):
-    structure = load_json("structure.json")
-    structure[user][floor][room_data["room_name"]] = room_data
-    save_json("structure.json", structure)
+def add_floor(user, floor):
+    structure = get_structure(user)
+    if floor not in structure:
+        structure[floor] = {}
+    save_structure(user, structure)
 
-# ===============================
-# MAIN UI
-# ===============================
+def add_room(user, floor, room):
+    structure = get_structure(user)
+    structure[floor][room] = {}
+    save_structure(user, structure)
+
+# =========================
+# START APP
+# =========================
 
 if "user" not in st.session_state:
     login()
 else:
-    user = st.session_state.user
-    settings = load_user_settings(user)
-    apply_theme(settings["theme"])
 
-    # Sidebar
+    user = st.session_state.user
+    structure = get_structure(user)
+
+    # =========================
+    # SIDEBAR HIERARCHY
+    # =========================
+
     with st.sidebar:
         st.header("Hierarchy")
 
-        if st.button("Add Floor"):
-            floor_name = st.text_input("Floor Name")
-            if st.button("Save Floor"):
-                add_floor(user, floor_name)
+        if st.button("➕ Add Floor"):
+            st.session_state.add_floor = True
 
-        structure = load_json("structure.json").get(user, {})
-        for floor in structure:
-            st.subheader(floor)
-            for room in structure[floor]:
-                st.write("↳", room)
+        if st.session_state.get("add_floor"):
+            new_floor = st.text_input("Floor Name")
+            if st.button("Save Floor"):
+                add_floor(user, new_floor)
+                st.session_state.add_floor = False
+                st.rerun()
 
         st.divider()
-        st.write(user)
+
+        if not structure:
+            st.info("No floors yet")
+        else:
+            for floor, rooms in structure.items():
+                with st.expander(f"🏢 {floor}", expanded=False):
+                    if not rooms:
+                        st.write("No rooms")
+                    for room in rooms:
+                        st.write(f"   └ 🛏 {room}")
+
+        st.divider()
+
         if st.button("Logout"):
             del st.session_state.user
             st.rerun()
 
-        if st.button("Settings"):
-            st.session_state.show_settings = True
+    # =========================
+    # NAVBAR
+    # =========================
 
-    # SETTINGS POPUP
-    if st.session_state.get("show_settings"):
-        st.title("Settings")
+    nav = st.radio("Navigation",
+                   ["Interior", "2D Plan", "3D", "Exterior"],
+                   horizontal=True)
 
-        account_name = st.text_input("Account Name", settings["account_name"])
-        theme = st.selectbox("Theme", ["light", "dark"])
-
-        if st.button("Save Settings"):
-            save_user_settings(user, {
-                "account_name": account_name,
-                "theme": theme
-            })
-            st.success("Saved")
-            st.session_state.show_settings = False
-            st.rerun()
-
-    # Navbar
-    nav = st.selectbox("Navigation",
-                       ["Interior", "2D Plan", "Exterior"])
+    # =========================
+    # INTERIOR
+    # =========================
 
     if nav == "Interior":
-        st.header("Interior Design")
+        st.header("Interior Generator")
 
-        floor = st.selectbox("Select Floor",
-                             list(structure.keys()))
+        prompt = st.text_area("Describe interior")
 
-        room_name = st.text_input("Room Name")
-        dim = st.text_input("Dimensions (LxW)")
-        style = st.selectbox("Interior Style",
-                             ["Modern", "Minimal", "Luxury", "Custom"])
-        color = st.text_input("Color")
-        furniture = st.text_input("Furniture")
-
-        uploaded = st.file_uploader("Upload Reference Image",
-                                     type=["png", "jpg"])
-
-        if st.button("Add Room"):
-            room_data = {
-                "room_name": room_name,
-                "dimensions": dim,
-                "style": style,
-                "color": color,
-                "furniture": furniture
-            }
-
-            add_room(user, floor, room_data)
-            st.success("Room Added")
-
-        if st.button("Generate Interior Image"):
-            prompt = f"{style} {room_name} with {color} theme and {furniture}"
+        if st.button("Generate Image"):
             result = generate_image(prompt)
+            st.json(result)
 
-            st.write(result)
+    # =========================
+    # 2D PLAN
+    # =========================
 
     if nav == "2D Plan":
-        st.header("2D Floor Planning")
+        st.header("2D Planning")
 
-        desc = st.text_area("Describe plan")
+        col1, col2 = st.columns(2)
 
-        if st.button("Generate Plan"):
-            result = call_reasoning(desc)
-            st.write(result)
+        with col1:
+            floor_name = st.text_input("Floor Name")
+            if st.button("Add Floor (2D)"):
+                add_floor(user, floor_name)
+                st.rerun()
+
+        with col2:
+            room_name = st.text_input("Room Name")
+            selected_floor = st.selectbox("Select Floor",
+                                          list(structure.keys()) if structure else [])
+            if st.button("Add Room (2D)"):
+                add_room(user, selected_floor, room_name)
+                st.rerun()
+
+        st.divider()
+
+        # PRE PLAN
+        st.subheader("Add Pre-Plan")
+        plan_desc = st.text_area("Describe layout")
+
+        if st.button("Add Pre-Plan"):
+            response = call_reasoning(
+                f"Extract floors and rooms from this: {plan_desc}"
+            )
+            st.json(response)
+
+        if st.button("Generate 2D Plan Image"):
+            img = generate_image(f"2D architectural floor plan of {plan_desc}")
+            st.json(img)
+
+        # Show each floor 2D plan
+        st.subheader("Generate Each Floor Plan")
+        for floor in structure:
+            if st.button(f"Generate {floor} Plan"):
+                img = generate_image(f"2D plan for floor {floor}")
+                st.json(img)
+
+    # =========================
+    # 3D
+    # =========================
+
+    if nav == "3D":
+        st.header("3D Model Generator")
+
+        uploaded = st.file_uploader("Upload Reference Image",
+                                    type=["png", "jpg", "jpeg"])
+
+        desc = st.text_area("Describe 3D changes")
+
+        if st.button("Generate 3D Model"):
+            img = generate_image(f"3D render based on {desc}")
+            st.json(img)
+
+    # =========================
+    # EXTERIOR
+    # =========================
 
     if nav == "Exterior":
-        st.header("Exterior Design")
+        st.header("Exterior Views")
 
-        prompt = st.text_area("Describe exterior")
+        desc = st.text_area("Describe exterior design")
 
-        if st.button("Generate Exterior"):
-            result = generate_image(prompt)
-            st.write(result)
+        if st.button("Generate Exterior Views"):
+
+            front = generate_image(f"Front view of house: {desc}")
+            side1 = generate_image(f"Left side view of house: {desc}")
+            side2 = generate_image(f"Right side view of house: {desc}")
+
+            st.subheader("Front")
+            st.json(front)
+
+            st.subheader("Side 1")
+            st.json(side1)
+
+            st.subheader("Side 2")
+            st.json(side2)
